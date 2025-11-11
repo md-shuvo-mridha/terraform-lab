@@ -1,0 +1,44 @@
+---
+- name: Setup application servers
+  hosts: rocky_servers
+  become: yes
+  tasks:
+    - name: Install Node Exporter for monitoring
+      shell: |
+        curl -LO https://github.com/prometheus/node_exporter/releases/download/v1.6.0/node_exporter-1.6.0.linux-amd64.tar.gz
+        tar xzf node_exporter-1.6.0.linux-amd64.tar.gz
+        cp node_exporter-1.6.0.linux-amd64/node_exporter /usr/local/bin/
+        useradd -rs /bin/false node_exporter
+
+    - name: Create Node Exporter service
+      copy:
+        content: |
+          [Unit]
+          Description=Node Exporter
+          After=network.target
+
+          [Service]
+          User=node_exporter
+          Type=simple
+          ExecStart=/usr/local/bin/node_exporter
+
+          [Install]
+          WantedBy=multi-user.target
+        dest: /etc/systemd/system/node_exporter.service
+
+    - name: Start Node Exporter
+      systemd:
+        name: node_exporter
+        enabled: yes
+        state: started
+
+    - name: Install Nginx for sample applications
+      dnf:
+        name: nginx
+        state: present
+
+    - name: Start Nginx
+      service:
+        name: nginx
+        enabled: yes
+        state: started

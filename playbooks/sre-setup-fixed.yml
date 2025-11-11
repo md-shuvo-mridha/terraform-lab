@@ -1,0 +1,112 @@
+---
+- name: Setup SRE monitoring server
+  hosts: sre_servers
+  become: yes
+  tasks:
+    - name: Install Docker
+      shell: |
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        usermod -aG docker $USER
+
+    - name: Install Docker Compose Plugin
+      apt:
+        name: docker-compose-plugin
+        state: present
+
+    - name: Create monitoring directory
+      file:
+        path: /opt/monitoring
+        state: directory
+
+    - name: Setup Prometheus configuration
+      copy:
+        content: |
+          global:
+            scrape_interval: 15s
+
+          scrape_configs:
+            - job_name: 'prometheus'
+              static_configs:
+                - targets: ['localhost:9090']
+
+            - job_name: 'node_exporter'
+              static_configs:
+                - targets: ['node_exporter:9100']
+
+            - job_name: 'rocky_servers'
+              static_configs:
+                - targets: ['rocky-app-01:9100', 'rocky-app-02:9100']
+        dest: /opt/monitoring/prometheus.yml
+
+    - name: Create Docker Compose file for monitoring
+      copy:
+        content: |
+          version: '3'
+          services:
+            prometheus:
+              image: prom/prometheus:latest
+              container_name: prometheus
+              ports:
+                - "9090:9090"
+              volumes:
+                - ./prometheus.yml:/etc/prometheus/prometheus.yml
+                - prom_data:/prometheus
+              command:
+                - '--config.file=/etc/prometheus/prometheus.yml'
+                - '--storage.tsdb.path=/prometheus'
+                - '--web.console.libraries=/etc/prometheus/console_libraries'
+                - '--web.console.templates=/etc/prometheus/consoles'
+                - '--storage.tsdb.retention.time=200h'
+                - '--web.enable-lifecycle'
+
+            grafana:
+              image: grafana/grafana:latest
+              container_name: grafana
+              ports:
+                - "3000:3000"
+              volumes:
+                - grafana_data:/var/lib/grafana
+              environment:
+                - GF_SECURITY_ADMIN_PASSWORD=admin123
+                - GF_SECURITY_ADMIN_USER=admin
+
+            node_exporter:
+              image: prom/node-exporter:latest
+              container_name: node_exporter
+              ports:
+                - "9100:9100"
+              volumes:
+                - /proc:/host/proc:ro
+                - /sys:/host/sys:ro
+                - /:/rootfs:ro
+              command:
+                - '--path.procfs=/host/proc'
+                - '--path.rootfs=/rootfs'
+                - '--path.sysfs=/host/sys'
+                - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+
+          volumes:
+            prom_data:
+            grafana_data:
+        dest: /opt/monitoring/docker-compose.yml
+
+    - name: Start monitoring stack with docker compose
+      shell: |
+        cd /opt/monitoring && docker compose up -d
+      args:
+        chdir: /opt/monitoring
+
+    - name: Wait for services to start
+      shell: sleep 10
+
+    - name: Check running containers
+      shell: docker ps
+      register: running_containers
+
+    - name: Display monitoring access info
+      debug:
+        msg: |
+          Prometheus: http://{{ ansible_host }}:9090
+          Grafana: http://{{ ansible_host }}:3000 (admin/admin123)
+          Node Exporter: http://{{ ansible_host }}:9100

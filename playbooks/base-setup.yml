@@ -1,0 +1,43 @@
+---
+- name: Base system setup for all servers
+  hosts: all
+  become: yes
+  tasks:
+    - name: Update package cache
+      apt:
+        update_cache: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Update package cache (Rocky)
+      dnf:
+        update_cache: yes
+      when: ansible_os_family == "RedHat"
+
+    - name: Install common packages
+      package:
+        name:
+          - curl
+          - wget
+          - vim
+          - htop
+          - net-tools
+          - git
+        state: present
+
+    - name: Configure timezone
+      timezone:
+        name: UTC
+
+    - name: Enable and start NTP
+      service:
+        name: chronyd
+        enabled: yes
+        state: started
+      when: ansible_os_family == "RedHat"
+
+    - name: Enable and start NTP (Debian)
+      service:
+        name: systemd-timesyncd
+        enabled: yes
+        state: started
+      when: ansible_os_family == "Debian"

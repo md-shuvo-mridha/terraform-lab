@@ -1,0 +1,60 @@
+---
+- name: Setup DevOps tools server
+  hosts: devops_servers
+  become: yes
+  tasks:
+    - name: Install Docker
+      shell: |
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        usermod -aG docker $USER
+
+    - name: Install Docker Compose Plugin (new method)
+      shell: |
+        apt update
+        apt install -y docker-compose-plugin
+
+    - name: Check available Java packages
+      shell: apt-cache search openjdk | grep jdk
+      register: available_java
+
+    - name: Display available Java versions
+      debug:
+        msg: "Available Java packages: {{ available_java.stdout_lines }}"
+
+    - name: Install available Java JDK
+      apt:
+        name: openjdk-21-jdk
+        state: present
+
+    - name: Install Jenkins using Docker (alternative method)
+      shell: |
+        docker run -d \
+          --name jenkins \
+          -p 8080:8080 \
+          -p 50000:50000 \
+          -v jenkins_home:/var/jenkins_home \
+          jenkins/jenkins:lts-jdk21
+
+    - name: Install GitLab Runner using Docker
+      shell: |
+        docker run -d --name gitlab-runner --restart always \
+          -v /srv/gitlab-runner/config:/etc/gitlab-runner \
+          -v /var/run/docker.sock:/var/run/docker.sock \
+          gitlab/gitlab-runner:latest
+
+    - name: Wait for Jenkins to start
+      shell: sleep 30
+      async: 45
+      poll: 0
+
+    - name: Get Jenkins initial admin password
+      shell: |
+        docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword 2>/dev/null || echo "Password not available yet"
+      register: jenkins_password
+
+    - name: Display Jenkins access info
+      debug:
+        msg: |
+          Jenkins is running on http://{{ ansible_host }}:8080
+          Initial admin password: {{ jenkins_password.stdout }}
